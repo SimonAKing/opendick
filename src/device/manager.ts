@@ -22,7 +22,7 @@ export interface LogEntry {
 }
 
 export interface ActiveMode {
-  type: "video" | "game";
+  type: "video" | "game" | "audio";
   label: string;
   positionMs?: number;
   durationMs?: number;
@@ -37,6 +37,7 @@ export interface Snapshot {
   maxIntensity: number;
   consoleUrl: string;
   activeMode: ActiveMode | null;
+  masters: number;
   devices: DeviceStateView[];
   log: LogEntry[];
 }
@@ -68,6 +69,7 @@ export class DeviceManager extends EventEmitter {
   private log: LogEntry[] = [];
   private activeMode: ActiveMode | null = null;
   private mode: Cancellable | null = null;
+  private masters = 0;
 
   constructor(private backend: DeviceBackend, opts: ManagerOptions = {}) {
     super();
@@ -83,6 +85,17 @@ export class DeviceManager extends EventEmitter {
 
   setActiveMode(m: ActiveMode | null): void {
     this.activeMode = m;
+    this.emitState();
+  }
+
+  /** Number of connected "master" remote-control clients. */
+  setMasterCount(n: number): void {
+    const next = Math.max(0, n);
+    if (next === this.masters) return;
+    const rose = next > this.masters;
+    this.masters = next;
+    this.addLog("info", `${next} master remote(s) connected`);
+    if (rose) this.addLog("safety", "a master is now in control");
     this.emitState();
   }
 
@@ -192,6 +205,7 @@ export class DeviceManager extends EventEmitter {
       maxIntensity: this.maxIntensity,
       consoleUrl: this.consoleUrl,
       activeMode: this.activeMode,
+      masters: this.masters,
       devices: this.backend.list().map((d) => ({
         ...d,
         intensity: this.intensities.get(d.id) ?? 0,

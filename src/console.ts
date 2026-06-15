@@ -3,11 +3,20 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { DeviceManager } from "./device/manager.js";
 import type { ModeController, GameType } from "./modes.js";
 import { CONSOLE_HTML } from "./consoleHtml.js";
+import { MASTER_HTML } from "./masterHtml.js";
+import { PRESETS } from "./presets.js";
 import { logErr } from "./util.js";
 
 /**
  * Serves the web console (HTML + live WebSocket) from the same process that
  * runs the MCP server, so the console and Claude share one device state.
+ *
+ * Two pages share one WebSocket:
+ *   /         the full console (wearer / operator view)
+ *   /master   a focused remote for a "master" controlling the device
+ * A client that connects to /ws?role=master is counted as a master so every
+ * page can show that a master is in control.
+ *
  * Resolves once the port is bound (or skipped on EADDRINUSE).
  */
 export function startConsole(
@@ -16,10 +25,14 @@ export function startConsole(
   port: number
 ): Promise<void> {
   const httpServer = http.createServer((req, res) => {
-    if (req.url === "/" || req.url?.startsWith("/index")) {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/" || path.startsWith("/index")) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(CONSOLE_HTML);
-    } else if (req.url === "/state") {
+    } else if (path === "/master") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(MASTER_HTML);
+    } else if (path === "/state") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(manager.snapshot()));
     } else {
@@ -29,6 +42,7 @@ export function startConsole(
   });
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  const masters = new Set<WebSocket>();
 
   const broadcast = () => {
     const msg = JSON.stringify({ type: "state", state: manager.snapshot() });
@@ -38,8 +52,18 @@ export function startConsole(
   };
   manager.on("state", broadcast);
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req) => {
+    const isMaster = (req.url ?? "").includes("role=master");
+    if (isMaster) {
+      masters.add(ws);
+      manager.setMasterCount(masters.size);
+    }
     ws.send(JSON.stringify({ type: "state", state: manager.snapshot() }));
+
+    ws.on("close", () => {
+      if (masters.delete(ws)) manager.setMasterCount(masters.size);
+    });
+
     ws.on("message", async (raw) => {
       let m: any;
       try {
@@ -52,6 +76,18 @@ export function startConsole(
           case "set":
             await manager.vibrate(m.id ?? "all", Number(m.intensity), m.durationMs);
             break;
+          case "drive": // high-frequency, low-noise (audio mode)
+            for (const id of manager.resolveTargets(m.target ?? "all")) {
+              await manager.driveStep(id, Number(m.intensity));
+            }
+            break;
+          case "audio_start":
+            manager.setActiveMode({ type: "audio", label: String(m.source ?? "mic") });
+            break;
+          case "audio_stop":
+            await manager.stop(m.target ?? "all");
+            manager.setActiveMode(null);
+            break;
           case "stop_all":
             await manager.stopAll();
             break;
@@ -61,6 +97,11 @@ export function startConsole(
           case "set_max":
             manager.setMaxIntensity(Number(m.value));
             break;
+          case "pattern": {
+            const steps = PRESETS[m.preset as string] ?? PRESETS.pulse;
+            await manager.pattern(m.target ?? "all", steps, Number(m.loops) || 1);
+            break;
+          }
           case "load_funscript":
             await modes.loadFunscript(String(m.source));
             break;
@@ -98,7 +139,7 @@ export function startConsole(
       resolve();
     });
     httpServer.listen(port, () => {
-      logErr(`console: http://localhost:${port}`);
+      logErr(`console: http://localhost:${port}  (master remote: /master)`);
       resolve();
     });
   });

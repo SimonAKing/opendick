@@ -14716,12 +14716,23 @@ var DeviceManager = class extends EventEmitter {
   log = [];
   activeMode = null;
   mode = null;
+  masters = 0;
   /** Lets emergency/stop cancel a running video/game mode too. */
   attachMode(mode2) {
     this.mode = mode2;
   }
   setActiveMode(m) {
     this.activeMode = m;
+    this.emitState();
+  }
+  /** Number of connected "master" remote-control clients. */
+  setMasterCount(n) {
+    const next = Math.max(0, n);
+    if (next === this.masters) return;
+    const rose = next > this.masters;
+    this.masters = next;
+    this.addLog("info", `${next} master remote(s) connected`);
+    if (rose) this.addLog("safety", "a master is now in control");
     this.emitState();
   }
   async connect() {
@@ -14821,6 +14832,7 @@ var DeviceManager = class extends EventEmitter {
       maxIntensity: this.maxIntensity,
       consoleUrl: this.consoleUrl,
       activeMode: this.activeMode,
+      masters: this.masters,
       devices: this.backend.list().map((d) => ({
         ...d,
         intensity: this.intensities.get(d.id) ?? 0
@@ -15036,77 +15048,63 @@ var CONSOLE_HTML = (
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    background: #0e0f13; color: #e7e9ee;
-  }
-  header {
-    display: flex; align-items: center; gap: 12px; padding: 14px 20px;
-    border-bottom: 1px solid #20232c; position: sticky; top: 0; background: #0e0f13e6; backdrop-filter: blur(6px);
-  }
-  h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
-  .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid #2c3040; color: #aab; }
-  .badge.sim { color: #7fd1b9; border-color: #1f4a3e; background: #0f231d; }
-  .badge.bp  { color: #f0a35e; border-color: #4a3320; background: #231a0f; }
+  body { margin:0; font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background:#0e0f13; color:#e7e9ee; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid #20232c;
+    position:sticky; top:0; background:#0e0f13e6; backdrop-filter:blur(6px); z-index:5; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:650; letter-spacing:.2px; }
+  .badge { font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid #2c3040; color:#aab; }
+  .badge.sim { color:#7fd1b9; border-color:#1f4a3e; background:#0f231d; }
+  .badge.bp  { color:#f0a35e; border-color:#4a3320; background:#231a0f; }
+  .badge.act { color:#c9a0ff; border-color:#3a2a55; background:#1a1326; }
   .badge.dot { display:inline-flex; align-items:center; gap:6px; }
   .dot { width:7px; height:7px; border-radius:50%; background:#56607a; }
   .dot.on { background:#7fd1b9; box-shadow:0 0 8px #7fd1b9; }
-  .spacer { flex: 1; }
-  button {
-    font: inherit; cursor: pointer; border-radius: 9px; border: 1px solid #2c3040;
-    background: #171a22; color: #e7e9ee; padding: 8px 14px;
-  }
-  button:hover { border-color: #3a4055; }
-  button.stop { background: #b3261e; border-color: #d6443b; color: #fff; font-weight: 700; }
-  button.stop:hover { background: #c92f26; }
-  main { padding: 20px; display: grid; gap: 18px; grid-template-columns: 1fr; max-width: 1100px; margin: 0 auto; }
-  @media (min-width: 760px){ main { grid-template-columns: 2fr 1fr; } }
-  .panel { background: #12141b; border: 1px solid #20232c; border-radius: 14px; padding: 16px; }
-  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: #8a90a3; margin: 0 0 12px; }
-  .devices { display: grid; gap: 14px; }
-  .card { background: #161922; border: 1px solid #232735; border-radius: 12px; padding: 14px; overflow: hidden; }
-  .card-top { display:flex; align-items:center; gap:10px; margin-bottom: 12px; }
-  .motorwrap { width: 54px; height: 54px; display:flex; align-items:center; justify-content:center; flex: none; }
-  .motor {
-    width: 40px; height: 40px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #ff7eb3, #c2185b 70%);
-    box-shadow: 0 0 0 0 rgba(255,126,179,.0);
-    --amp: 0px; --spd: .2s; --glow: 0;
-  }
-  .motor.live { animation: buzz var(--spd) linear infinite; box-shadow: 0 0 calc(8px + 22px*var(--glow)) rgba(255,126,179,calc(.25 + .6*var(--glow))); }
+  .spacer { flex:1; }
+  button { font:inherit; cursor:pointer; border-radius:9px; border:1px solid #2c3040; background:#171a22;
+    color:#e7e9ee; padding:8px 14px; }
+  button:hover { border-color:#3a4055; }
+  button.stop { background:#b3261e; border-color:#d6443b; color:#fff; font-weight:700; }
+  button.stop:hover { background:#c92f26; }
+  button.ghost { padding:6px 10px; font-size:12px; }
+  main { padding:20px; display:grid; gap:18px; grid-template-columns:1fr; max-width:1100px; margin:0 auto; }
+  @media (min-width:760px){ main { grid-template-columns:2fr 1fr; } }
+  .panel { background:#12141b; border:1px solid #20232c; border-radius:14px; padding:16px; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:#8a90a3; margin:0 0 12px; }
+  .devices { display:grid; gap:14px; }
+  .card { background:#161922; border:1px solid #232735; border-radius:12px; padding:14px; overflow:hidden; }
+  .card-top { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .motorwrap { width:54px; height:54px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .motor { width:40px; height:40px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ff7eb3, #c2185b 70%);
+    box-shadow:0 0 0 0 rgba(255,126,179,0); --amp:0px; --spd:.2s; --glow:0; }
+  .motor.live { animation:buzz var(--spd) linear infinite;
+    box-shadow:0 0 calc(8px + 22px*var(--glow)) rgba(255,126,179,calc(.25 + .6*var(--glow))); }
   @keyframes buzz {
-    0%   { transform: translate(calc(var(--amp)*-1), 0); }
-    25%  { transform: translate(var(--amp), calc(var(--amp)*-1)); }
-    50%  { transform: translate(calc(var(--amp)*-1), var(--amp)); }
-    75%  { transform: translate(var(--amp), 0); }
-    100% { transform: translate(calc(var(--amp)*-1), 0); }
-  }
-  .name { font-weight: 600; }
-  .meta { font-size: 12px; color: #8a90a3; }
-  .pct { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
-  .bar { height: 8px; border-radius: 999px; background: #232735; overflow: hidden; margin: 10px 0; }
-  .bar > i { display:block; height:100%; width:0%; background: linear-gradient(90deg,#ff7eb3,#ff4d8d); transition: width .12s linear; }
-  input[type=range] { width: 100%; accent-color: #ff4d8d; }
+    0%{transform:translate(calc(var(--amp)*-1),0)} 25%{transform:translate(var(--amp),calc(var(--amp)*-1))}
+    50%{transform:translate(calc(var(--amp)*-1),var(--amp))} 75%{transform:translate(var(--amp),0)}
+    100%{transform:translate(calc(var(--amp)*-1),0)} }
+  .name { font-weight:600; }
+  .meta { font-size:12px; color:#8a90a3; }
+  .pct { margin-left:auto; font-variant-numeric:tabular-nums; font-weight:700; font-size:18px; }
+  .bar { height:8px; border-radius:999px; background:#232735; overflow:hidden; margin:10px 0; }
+  .bar > i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#ff7eb3,#ff4d8d); transition:width .12s linear; }
+  input[type=range] { width:100%; accent-color:#ff4d8d; }
   .row { display:flex; align-items:center; gap:10px; }
-  .small { font-size: 12px; color: #8a90a3; }
-  .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; max-height: 420px; overflow:auto; display:flex; flex-direction:column-reverse; }
-  .log div { padding: 3px 0; border-bottom: 1px solid #1a1d26; white-space: pre-wrap; }
-  .lv-cmd { color: #9ecbff; }
-  .lv-safety { color: #ff9e9e; }
-  .lv-warn { color: #ffd27f; }
-  .lv-info { color: #8a90a3; }
-  .empty { color:#6b7184; padding: 8px 0; }
-  .ctrls { display:flex; gap:8px; align-items:center; margin-top: 10px; flex-wrap: wrap; }
-  .maxrow { display:flex; align-items:center; gap:10px; margin-top: 8px; }
-  .badge.act { color:#c9a0ff; border-color:#3a2a55; background:#1a1326; }
-  .modes { grid-column: 1 / -1; }
+  .small { font-size:12px; color:#8a90a3; }
+  .log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; max-height:420px;
+    overflow:auto; display:flex; flex-direction:column-reverse; }
+  .log div { padding:3px 0; border-bottom:1px solid #1a1d26; white-space:pre-wrap; }
+  .lv-cmd { color:#9ecbff; } .lv-safety { color:#ff9e9e; } .lv-warn { color:#ffd27f; } .lv-info { color:#8a90a3; }
+  .empty { color:#6b7184; padding:8px 0; }
+  .ctrls { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  .maxrow { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .modes { grid-column:1 / -1; }
   .modegrid { display:grid; gap:18px; grid-template-columns:1fr; }
-  @media (min-width: 760px){ .modegrid { grid-template-columns: 1fr 1fr; } }
+  @media (min-width:760px){ .modegrid { grid-template-columns:1fr 1fr 1fr; } }
   .modegrid h3 { font-size:13px; margin:0 0 8px; font-weight:600; }
-  textarea#fs {
-    width:100%; height:84px; background:#0e1016; color:#e7e9ee; border:1px solid #232735;
-    border-radius:8px; padding:8px; font-family: ui-monospace, Menlo, monospace; font-size:12px; resize:vertical;
-  }
+  textarea#fs { width:100%; height:84px; background:#0e1016; color:#e7e9ee; border:1px solid #232735;
+    border-radius:8px; padding:8px; font-family:ui-monospace, Menlo, monospace; font-size:12px; resize:vertical; }
   label.opt { font-size:12px; color:#aab; display:inline-flex; align-items:center; gap:5px; }
   input[type=number] { background:#0e1016; color:#e7e9ee; border:1px solid #232735; border-radius:6px; padding:4px 6px; }
 </style>
@@ -15115,50 +15113,66 @@ var CONSOLE_HTML = (
 <header>
   <h1>opendick</h1>
   <span id="mode" class="badge">\u2026</span>
-  <span class="badge dot"><span id="conn" class="dot"></span><span id="connlbl">connecting</span></span>
+  <span class="badge dot"><span id="conn" class="dot"></span><span id="connlbl"></span></span>
   <span id="active" class="badge act" style="display:none"></span>
+  <span id="masters" class="badge act" style="display:none"></span>
   <div class="spacer"></div>
-  <button id="scan">Scan</button>
-  <button id="stopall" class="stop">\u25A0 EMERGENCY STOP</button>
+  <button id="lang" class="ghost"></button>
+  <button id="remote" data-i18n="remote"></button>
+  <button id="scan" data-i18n="scan"></button>
+  <button id="stopall" class="stop" data-i18n="estop"></button>
 </header>
 <main>
   <section class="panel">
-    <h2>Devices</h2>
-    <div id="devices" class="devices"><div class="empty">No devices yet.</div></div>
+    <h2 data-i18n="devices"></h2>
+    <div id="devices" class="devices"><div class="empty" data-i18n="noDev"></div></div>
     <div class="maxrow">
-      <span class="small">Safety max</span>
+      <span class="small" data-i18n="safetyMax"></span>
       <input id="max" type="range" min="0" max="1" step="0.01" value="1" style="max-width:220px" />
       <span id="maxval" class="small">100%</span>
     </div>
   </section>
   <section class="panel">
-    <h2>Log</h2>
+    <h2 data-i18n="log"></h2>
     <div id="log" class="log"><div class="empty">\u2026</div></div>
   </section>
   <section class="panel modes">
-    <h2>Modes</h2>
+    <h2 data-i18n="modes"></h2>
     <div class="modegrid">
       <div>
-        <h3>\u{1F3AC} Video \u2014 funscript</h3>
-        <textarea id="fs" placeholder='paste funscript JSON e.g. {"actions":[{"at":0,"pos":0},{"at":600,"pos":100},{"at":1200,"pos":0}]}'></textarea>
+        <h3 data-i18n="videoTitle"></h3>
+        <textarea id="fs" data-i18n-ph="fsPh"></textarea>
         <div class="ctrls">
-          <label class="opt"><input type="checkbox" id="fsloop" /> loop</label>
-          <label class="opt">speed <input id="fsspeed" type="number" min="0.1" max="4" step="0.1" value="1" style="width:58px" /></label>
-          <label class="opt"><input type="checkbox" id="fsinv" /> invert</label>
-          <button id="fsplay">\u25B6 Play</button>
+          <label class="opt"><input type="checkbox" id="fsloop" /> <span data-i18n="loop"></span></label>
+          <label class="opt"><span data-i18n="speed"></span> <input id="fsspeed" type="number" min="0.1" max="4" step="0.1" value="1" style="width:58px" /></label>
+          <label class="opt"><input type="checkbox" id="fsinv" /> <span data-i18n="invert"></span></label>
+          <button id="fsplay" data-i18n="play"></button>
         </div>
       </div>
       <div>
-        <h3>\u{1F3AE} Game</h3>
+        <h3 data-i18n="gameTitle"></h3>
         <div class="ctrls">
-          <button data-game="roulette">\u{1F3B2} Roulette</button>
-          <button data-game="escalation">\u{1F4C8} Escalation</button>
-          <button data-game="ambient">\u{1F30A} Ambient</button>
+          <button data-game="roulette" data-i18n="roulette"></button>
+          <button data-game="escalation" data-i18n="escalation"></button>
+          <button data-game="ambient" data-i18n="ambient"></button>
         </div>
         <div class="maxrow">
-          <span class="small">game max</span>
-          <input id="gmax" type="range" min="0" max="1" step="0.01" value="1" style="max-width:160px" />
+          <span class="small" data-i18n="gameMax"></span>
+          <input id="gmax" type="range" min="0" max="1" step="0.01" value="1" style="max-width:140px" />
           <span id="gmaxval" class="small">100%</span>
+        </div>
+      </div>
+      <div>
+        <h3 data-i18n="audioTitle"></h3>
+        <div class="ctrls">
+          <button id="audmic" data-i18n="useMic"></button>
+          <button id="audtab" data-i18n="useTab"></button>
+          <button id="audstop" class="stop" style="display:none" data-i18n="stopAudio"></button>
+        </div>
+        <div class="maxrow">
+          <span class="small" data-i18n="sensitivity"></span>
+          <input id="audgain" type="range" min="0.5" max="6" step="0.1" value="2.5" style="max-width:140px" />
+          <span id="audmeter" class="small">0%</span>
         </div>
       </div>
     </div>
@@ -15166,138 +15180,408 @@ var CONSOLE_HTML = (
       <div id="modelbl" class="small"></div>
       <div class="bar"><i id="modeprog" style="width:0%; background:linear-gradient(90deg,#a06bff,#c9a0ff)"></i></div>
     </div>
-    <div class="ctrls"><button id="modestop" class="stop">\u25A0 Stop mode</button></div>
+    <div class="ctrls"><button id="modestop" class="stop" data-i18n="stopMode"></button></div>
   </section>
 </main>
 <script>
-  const $ = (s) => document.querySelector(s);
-  let ws, state = null, sliderHeld = new Set();
+  var I18N = {
+    en: {
+      remote:"\u{1F451} Remote", scan:"Scan", estop:"\u25A0 EMERGENCY STOP",
+      devices:"Devices", log:"Log", modes:"Modes", safetyMax:"Safety max",
+      noDev:"No devices. Hit Scan.", noActivity:"No activity yet.",
+      connecting:"connecting", connected:"connected", reconnecting:"reconnecting",
+      motor:"motor", motors:"motors", stop:"Stop",
+      videoTitle:"\u{1F3AC} Video \u2014 funscript",
+      fsPh:'paste funscript JSON e.g. {"actions":[{"at":0,"pos":0},{"at":600,"pos":100},{"at":1200,"pos":0}]}',
+      loop:"loop", speed:"speed", invert:"invert", play:"\u25B6 Play",
+      gameTitle:"\u{1F3AE} Game", roulette:"\u{1F3B2} Roulette", escalation:"\u{1F4C8} Escalation", ambient:"\u{1F30A} Ambient", gameMax:"game max",
+      audioTitle:"\u{1F3B5} Audio \u2014 mic / sound", useMic:"\u{1F3A4} Microphone", useTab:"\u{1F50A} Tab audio", stopAudio:"\u25A0 Stop audio", sensitivity:"sensitivity",
+      stopMode:"\u25A0 Stop mode",
+      mastersOn:"\u{1F451} {n} master in control", mastersOnN:"\u{1F451} {n} masters in control",
+      needFs:"Paste a funscript JSON first.", audFail:"Audio capture failed: ",
+      langBtn:"\u4E2D\u6587"
+    },
+    zh: {
+      remote:"\u{1F451} \u9065\u63A7", scan:"\u626B\u63CF", estop:"\u25A0 \u7D27\u6025\u505C\u6B62",
+      devices:"\u8BBE\u5907", log:"\u65E5\u5FD7", modes:"\u6A21\u5F0F", safetyMax:"\u5B89\u5168\u4E0A\u9650",
+      noDev:"\u6682\u65E0\u8BBE\u5907\uFF0C\u70B9\u626B\u63CF\u3002", noActivity:"\u6682\u65E0\u6D3B\u52A8\u3002",
+      connecting:"\u8FDE\u63A5\u4E2D", connected:"\u5DF2\u8FDE\u63A5", reconnecting:"\u91CD\u8FDE\u4E2D",
+      motor:"\u9A6C\u8FBE", motors:"\u9A6C\u8FBE", stop:"\u505C\u6B62",
+      videoTitle:"\u{1F3AC} \u89C6\u9891 \u2014 funscript",
+      fsPh:'\u7C98\u8D34 funscript JSON\uFF0C\u4F8B\u5982 {"actions":[{"at":0,"pos":0},{"at":600,"pos":100},{"at":1200,"pos":0}]}',
+      loop:"\u5FAA\u73AF", speed:"\u901F\u5EA6", invert:"\u53CD\u5411", play:"\u25B6 \u64AD\u653E",
+      gameTitle:"\u{1F3AE} \u6E38\u620F", roulette:"\u{1F3B2} \u8F6E\u76D8", escalation:"\u{1F4C8} \u9012\u589E", ambient:"\u{1F30A} \u73AF\u5883", gameMax:"\u6E38\u620F\u4E0A\u9650",
+      audioTitle:"\u{1F3B5} \u97F3\u9891 \u2014 \u9EA6\u514B\u98CE/\u58F0\u97F3", useMic:"\u{1F3A4} \u9EA6\u514B\u98CE", useTab:"\u{1F50A} \u6807\u7B7E\u9875\u58F0\u97F3", stopAudio:"\u25A0 \u505C\u6B62\u97F3\u9891", sensitivity:"\u7075\u654F\u5EA6",
+      stopMode:"\u25A0 \u505C\u6B62\u6A21\u5F0F",
+      mastersOn:"\u{1F451} {n} \u4F4D\u4E3B\u4EBA\u5728\u63A7\u5236", mastersOnN:"\u{1F451} {n} \u4F4D\u4E3B\u4EBA\u5728\u63A7\u5236",
+      needFs:"\u8BF7\u5148\u7C98\u8D34 funscript JSON\u3002", audFail:"\u97F3\u9891\u91C7\u96C6\u5931\u8D25\uFF1A",
+      langBtn:"EN"
+    }
+  };
+  var lang = localStorage.getItem("opendick_lang") || ((navigator.language||"").indexOf("zh")===0 ? "zh" : "en");
+  function t(k){ return (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k; }
+  function applyI18n(){
+    document.querySelectorAll("[data-i18n]").forEach(function(el){ el.textContent = t(el.getAttribute("data-i18n")); });
+    document.querySelectorAll("[data-i18n-ph]").forEach(function(el){ el.placeholder = t(el.getAttribute("data-i18n-ph")); });
+    document.getElementById("lang").textContent = t("langBtn");
+    if (state) render();
+  }
+
+  var $ = function(s){ return document.querySelector(s); };
+  var ws, state = null, sliderHeld = {};
 
   function connect() {
-    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    ws.onopen = () => { $("#conn").classList.add("on"); $("#connlbl").textContent = "connected"; };
-    ws.onclose = () => { $("#conn").classList.remove("on"); $("#connlbl").textContent = "reconnecting"; setTimeout(connect, 1000); };
-    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "state") { state = m.state; render(); } };
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/ws");
+    ws.onopen = function(){ $("#conn").classList.add("on"); $("#connlbl").textContent = t("connected"); };
+    ws.onclose = function(){ $("#conn").classList.remove("on"); $("#connlbl").textContent = t("reconnecting"); setTimeout(connect, 1000); };
+    ws.onmessage = function(e){ var m = JSON.parse(e.data); if (m.type === "state") { state = m.state; render(); } };
   }
-  const send = (o) => { try { ws && ws.readyState === 1 && ws.send(JSON.stringify(o)); } catch {} };
+  var send = function(o){ try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch(e){} };
 
   function render() {
     if (!state) return;
-    const mode = $("#mode");
+    var mode = $("#mode");
     mode.textContent = state.mode;
     mode.className = "badge " + (state.mode === "buttplug" ? "bp" : "sim");
-    const maxEl = $("#max");
-    if (!sliderHeld.has("__max")) { maxEl.value = state.maxIntensity; $("#maxval").textContent = Math.round(state.maxIntensity*100)+"%"; }
+    var maxEl = $("#max");
+    if (!sliderHeld["__max"]) { maxEl.value = state.maxIntensity; $("#maxval").textContent = Math.round(state.maxIntensity*100)+"%"; }
 
-    const act = $("#active"), mb = $("#modebar");
+    var act = $("#active"), mb = $("#modebar");
     if (state.activeMode) {
       act.style.display = "";
-      act.textContent = (state.activeMode.type === "video" ? "\u{1F3AC} " : "\u{1F3AE} ") + state.activeMode.label;
+      var g = state.activeMode.type === "video" ? "\u{1F3AC} " : (state.activeMode.type === "audio" ? "\u{1F3B5} " : "\u{1F3AE} ");
+      act.textContent = g + state.activeMode.label;
       if (state.activeMode.durationMs) {
         mb.style.display = "";
         $("#modelbl").textContent = state.activeMode.type + " \xB7 " + state.activeMode.label;
-        const p = state.activeMode.positionMs != null ? (state.activeMode.positionMs / state.activeMode.durationMs * 100) : 0;
+        var p = state.activeMode.positionMs != null ? (state.activeMode.positionMs / state.activeMode.durationMs * 100) : 0;
         $("#modeprog").style.width = Math.min(100, p) + "%";
       } else { mb.style.display = "none"; }
     } else { act.style.display = "none"; mb.style.display = "none"; }
 
-    const wrap = $("#devices");
-    if (!state.devices.length) { wrap.innerHTML = '<div class="empty">No devices. Hit Scan.</div>'; }
-    else {
-      wrap.innerHTML = "";
-      for (const d of state.devices) wrap.appendChild(card(d));
-    }
+    var mEl = $("#masters");
+    if (state.masters > 0) {
+      mEl.style.display = "";
+      mEl.textContent = (state.masters > 1 ? t("mastersOnN") : t("mastersOn")).replace("{n}", state.masters);
+    } else { mEl.style.display = "none"; }
 
-    const log = $("#log");
-    if (!state.log.length) { log.innerHTML = '<div class="empty">No activity yet.</div>'; }
+    var wrap = $("#devices");
+    if (!state.devices.length) { wrap.innerHTML = '<div class="empty">' + esc(t("noDev")) + '</div>'; }
+    else { wrap.innerHTML = ""; state.devices.forEach(function(d){ wrap.appendChild(card(d)); }); }
+
+    var log = $("#log");
+    if (!state.log.length) { log.innerHTML = '<div class="empty">' + esc(t("noActivity")) + '</div>'; }
     else {
       log.innerHTML = "";
-      for (const l of state.log) {
-        const div = document.createElement("div");
+      state.log.forEach(function(l){
+        var div = document.createElement("div");
         div.className = "lv-" + l.level;
-        const ts = new Date(l.t).toLocaleTimeString();
-        div.textContent = ts + "  " + l.msg;
+        div.textContent = new Date(l.t).toLocaleTimeString() + "  " + l.msg;
         log.appendChild(div);
-      }
+      });
     }
   }
 
   function card(d) {
-    const el = document.createElement("div");
+    var el = document.createElement("div");
     el.className = "card";
-    const i = d.intensity || 0;
-    const live = i > 0.001;
-    const amp = (i * 6).toFixed(2) + "px";
-    const spd = (0.2 - i * 0.13).toFixed(3) + "s";
-    const battery = d.battery == null ? "" : " \xB7 \u{1F50B} " + Math.round(d.battery*100) + "%";
+    var i = d.intensity || 0;
+    var live = i > 0.001;
+    var amp = (i * 6).toFixed(2) + "px";
+    var spd = (0.2 - i * 0.13).toFixed(3) + "s";
+    var battery = d.battery == null ? "" : " \xB7 \u{1F50B} " + Math.round(d.battery*100) + "%";
+    var motorWord = d.actuators > 1 ? t("motors") : t("motor");
     el.innerHTML =
       '<div class="card-top">' +
-        '<div class="motorwrap"><div class="motor'+(live?' live':'')+'" style="--amp:'+amp+';--spd:'+spd+';--glow:'+i+'"></div></div>' +
-        '<div><div class="name">'+esc(d.name)+'</div>' +
-        '<div class="meta">'+d.id+' \xB7 '+d.actuators+' motor'+(d.actuators>1?'s':'')+battery+'</div></div>' +
-        '<div class="pct">'+Math.round(i*100)+'%</div>' +
+        '<div class="motorwrap"><div class="motor' + (live ? " live" : "") + '" style="--amp:' + amp + ';--spd:' + spd + ';--glow:' + i + '"></div></div>' +
+        '<div><div class="name">' + esc(d.name) + '</div>' +
+        '<div class="meta">' + d.id + ' \xB7 ' + d.actuators + ' ' + motorWord + battery + '</div></div>' +
+        '<div class="pct">' + Math.round(i*100) + '%</div>' +
       '</div>' +
-      '<div class="bar"><i style="width:'+(i*100)+'%"></i></div>';
-    const slider = document.createElement("input");
+      '<div class="bar"><i style="width:' + (i*100) + '%"></i></div>';
+    var slider = document.createElement("input");
     slider.type = "range"; slider.min = "0"; slider.max = "1"; slider.step = "0.01"; slider.value = String(i);
-    slider.addEventListener("pointerdown", () => sliderHeld.add(d.id));
-    slider.addEventListener("pointerup", () => sliderHeld.delete(d.id));
-    slider.addEventListener("input", () => send({ type: "set", id: d.id, intensity: parseFloat(slider.value) }));
-    const ctrls = document.createElement("div");
-    ctrls.className = "ctrls";
+    slider.addEventListener("pointerdown", function(){ sliderHeld[d.id] = true; });
+    slider.addEventListener("pointerup", function(){ sliderHeld[d.id] = false; });
+    slider.addEventListener("input", function(){ send({ type:"set", id:d.id, intensity: parseFloat(slider.value) }); });
+    var ctrls = document.createElement("div"); ctrls.className = "ctrls";
     ctrls.appendChild(slider);
-    const stopBtn = document.createElement("button");
-    stopBtn.textContent = "Stop";
-    stopBtn.onclick = () => send({ type: "set", id: d.id, intensity: 0 });
+    var stopBtn = document.createElement("button");
+    stopBtn.textContent = t("stop");
+    stopBtn.onclick = function(){ send({ type:"set", id:d.id, intensity:0 }); };
     ctrls.appendChild(stopBtn);
     el.appendChild(ctrls);
     return el;
   }
 
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c]));
+  var esc = function(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]; }); };
 
-  $("#scan").onclick = () => send({ type: "scan", ms: 4000 });
-  $("#stopall").onclick = () => send({ type: "stop_all" });
-  const maxEl = $("#max");
-  maxEl.addEventListener("pointerdown", () => sliderHeld.add("__max"));
-  maxEl.addEventListener("pointerup", () => sliderHeld.delete("__max"));
-  maxEl.addEventListener("input", () => { $("#maxval").textContent = Math.round(maxEl.value*100)+"%"; send({ type: "set_max", value: parseFloat(maxEl.value) }); });
+  // controls
+  $("#scan").onclick = function(){ send({ type:"scan", ms:4000 }); };
+  $("#stopall").onclick = function(){ stopAudio(); send({ type:"stop_all" }); };
+  $("#remote").onclick = function(){ window.open("/master", "_blank"); };
+  $("#lang").onclick = function(){ lang = (lang === "en" ? "zh" : "en"); localStorage.setItem("opendick_lang", lang); applyI18n(); };
 
-  // modes
-  $("#fsplay").onclick = () => {
-    const source = $("#fs").value.trim();
-    if (!source) { alert("Paste a funscript JSON first."); return; }
-    send({
-      type: "play_video", source,
-      loop: $("#fsloop").checked,
-      speed: parseFloat($("#fsspeed").value) || 1,
-      invert: $("#fsinv").checked,
-    });
+  var maxEl = $("#max");
+  maxEl.addEventListener("pointerdown", function(){ sliderHeld["__max"] = true; });
+  maxEl.addEventListener("pointerup", function(){ sliderHeld["__max"] = false; });
+  maxEl.addEventListener("input", function(){ $("#maxval").textContent = Math.round(maxEl.value*100)+"%"; send({ type:"set_max", value: parseFloat(maxEl.value) }); });
+
+  // modes \u2014 video
+  $("#fsplay").onclick = function(){
+    var source = $("#fs").value.trim();
+    if (!source) { alert(t("needFs")); return; }
+    send({ type:"play_video", source:source, loop:$("#fsloop").checked, speed:parseFloat($("#fsspeed").value)||1, invert:$("#fsinv").checked });
   };
-  document.querySelectorAll("[data-game]").forEach((b) => {
-    b.addEventListener("click", () => send({
-      type: "start_game",
-      gameType: b.getAttribute("data-game"),
-      intensityMax: parseFloat($("#gmax").value),
-    }));
+  // modes \u2014 game
+  document.querySelectorAll("[data-game]").forEach(function(b){
+    b.addEventListener("click", function(){ send({ type:"start_game", gameType:b.getAttribute("data-game"), intensityMax:parseFloat($("#gmax").value) }); });
   });
-  const gmax = $("#gmax");
-  gmax.addEventListener("input", () => { $("#gmaxval").textContent = Math.round(gmax.value*100)+"%"; });
-  $("#modestop").onclick = () => send({ type: "stop_mode" });
+  var gmax = $("#gmax");
+  gmax.addEventListener("input", function(){ $("#gmaxval").textContent = Math.round(gmax.value*100)+"%"; });
+  $("#modestop").onclick = function(){ stopAudio(); send({ type:"stop_mode" }); };
 
+  // modes \u2014 audio (captured in the browser, streamed to the device)
+  var audioCtx = null, audioStream = null, audioRAF = null, audioOn = false, lastSend = 0;
+  function startAudio(kind) {
+    var req = kind === "tab" ? navigator.mediaDevices.getDisplayMedia({ audio:true, video:true })
+                            : navigator.mediaDevices.getUserMedia({ audio:true });
+    req.then(function(stream){
+      audioStream = stream;
+      if (kind === "tab") stream.getVideoTracks().forEach(function(tr){ tr.stop(); });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = audioCtx.createMediaStreamSource(stream);
+      var an = audioCtx.createAnalyser(); an.fftSize = 1024;
+      src.connect(an);
+      var buf = new Float32Array(an.fftSize);
+      audioOn = true;
+      send({ type:"audio_start", source: kind === "tab" ? "tab audio" : "mic" });
+      $("#audmic").style.display = "none"; $("#audtab").style.display = "none"; $("#audstop").style.display = "";
+      (function loop(){
+        if (!audioOn) return;
+        an.getFloatTimeDomainData(buf);
+        var sum = 0; for (var i=0;i<buf.length;i++) sum += buf[i]*buf[i];
+        var rms = Math.sqrt(sum / buf.length);
+        var gain = parseFloat($("#audgain").value) || 2.5;
+        var v = Math.max(0, Math.min(1, rms * gain * 4));
+        $("#audmeter").textContent = Math.round(v*100) + "%";
+        var now = (window.performance && performance.now) ? performance.now() : Date.now();
+        if (now - lastSend > 50) { lastSend = now; send({ type:"drive", target:"all", intensity:v }); }
+        audioRAF = requestAnimationFrame(loop);
+      })();
+    }).catch(function(e){ alert(t("audFail") + e.message); });
+  }
+  function stopAudio() {
+    if (!audioOn && !audioStream) return;
+    audioOn = false;
+    if (audioRAF) cancelAnimationFrame(audioRAF);
+    if (audioStream) audioStream.getTracks().forEach(function(tr){ tr.stop(); });
+    if (audioCtx) audioCtx.close();
+    audioStream = audioCtx = null;
+    send({ type:"audio_stop" });
+    $("#audmic").style.display = ""; $("#audtab").style.display = ""; $("#audstop").style.display = "none";
+    $("#audmeter").textContent = "0%";
+  }
+  $("#audmic").onclick = function(){ startAudio("mic"); };
+  $("#audtab").onclick = function(){ startAudio("tab"); };
+  $("#audstop").onclick = stopAudio;
+
+  applyI18n();
+  $("#connlbl").textContent = t("connecting");
   connect();
 </script>
 </body>
 </html>`
 );
 
+// src/masterHtml.ts
+var MASTER_HTML = (
+  /* html */
+  `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>opendick \xB7 master remote</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  body { margin:0 auto; max-width:560px; padding:18px; font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background:#0c0a10; color:#efe9f5; }
+  header { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  h1 { font-size:17px; margin:0; font-weight:700; }
+  .crown { font-size:20px; }
+  .spacer { flex:1; }
+  .ghost { font:inherit; cursor:pointer; background:#1d1727; color:#efe9f5; border:1px solid #322a40; border-radius:8px; padding:6px 10px; font-size:12px; }
+  .sub { color:#9b8fb0; font-size:12px; margin-bottom:18px; }
+  .dot { width:8px;height:8px;border-radius:50%;background:#56607a;display:inline-block;margin-right:4px; }
+  .dot.on { background:#7fd1b9; box-shadow:0 0 8px #7fd1b9; }
+  .card { background:#15111d; border:1px solid #2a2335; border-radius:16px; padding:18px; margin-bottom:16px; }
+  .level { text-align:center; }
+  .big { font-size:64px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; letter-spacing:-2px;
+    background:linear-gradient(90deg,#c9a0ff,#ff7eb3); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:38px; background:transparent; margin-top:10px; }
+  input[type=range]::-webkit-slider-runnable-track{ height:14px; border-radius:999px; background:linear-gradient(90deg,#a06bff,#ff4d8d); }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:34px;height:34px;border-radius:50%; background:#fff; margin-top:-10px; box-shadow:0 2px 10px rgba(0,0,0,.5); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button.b { font:inherit; font-weight:600; cursor:pointer; border-radius:12px; border:1px solid #322a40; background:#1d1727; color:#efe9f5; padding:14px; }
+  button.b:active { transform:scale(.97); }
+  .buzz { grid-column:1/-1; background:linear-gradient(90deg,#7a3bff,#ff3d7f); border:none; color:#fff; font-size:17px; padding:22px; }
+  .stop { width:100%; background:#b3261e; border:none; color:#fff; font-weight:800; font-size:18px; padding:20px; border-radius:14px; cursor:pointer; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:#8a7ea0; margin:0 0 10px; }
+  .small { color:#9b8fb0; font-size:12px; }
+  .maxrow { display:flex; align-items:center; gap:10px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="crown">\u{1F451}</span><h1 data-i18n="title"></h1>
+  <span class="spacer"></span>
+  <button id="lang" class="ghost"></button>
+</header>
+<div class="sub"><span id="dot" class="dot"></span><span id="status"></span> \xB7 <span id="devinfo">\u2014</span></div>
+
+<div class="card level">
+  <div class="big"><span id="lvl">0</span><span style="font-size:24px">%</span></div>
+  <input id="dial" type="range" min="0" max="100" step="1" value="0" />
+  <div class="small" data-i18n="dialHint"></div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="quick"></h2>
+  <div class="grid">
+    <button class="b buzz" id="buzz" data-i18n="buzz"></button>
+    <button class="b" data-pat="pulse" data-i18n="pulse"></button>
+    <button class="b" data-pat="wave" data-i18n="wave"></button>
+    <button class="b" data-pat="escalate" data-i18n="escalate"></button>
+    <button class="b" data-pat="tease" data-i18n="tease"></button>
+    <button class="b" data-game="roulette" data-i18n="roulette"></button>
+    <button class="b" data-game="ambient" data-i18n="ambient"></button>
+  </div>
+  <div class="maxrow">
+    <span class="small" data-i18n="safetyMax"></span>
+    <input id="max" type="range" min="0" max="1" step="0.01" value="1" />
+    <span id="maxval" class="small">100%</span>
+  </div>
+</div>
+
+<button class="stop" id="stop" data-i18n="stopAll"></button>
+
+<script>
+  var I18N = {
+    en: { title:"master remote", langBtn:"\u4E2D\u6587", quick:"Quick", dialHint:"drag to set sustained intensity",
+      buzz:"\u26A1 HOLD TO BUZZ", pulse:"Pulse", wave:"Wave", escalate:"Escalate", tease:"Tease",
+      roulette:"\u{1F3B2} Roulette", ambient:"\u{1F30A} Ambient", safetyMax:"safety max", stopAll:"\u25A0 STOP EVERYTHING",
+      inControl:"in control", connecting:"connecting\u2026", reconnecting:"reconnecting\u2026",
+      noDev:"no devices \u2014 tap a control to scan", devN:"{n} device", devNs:"{n} devices" },
+    zh: { title:"\u4E3B\u4EBA\u9065\u63A7", langBtn:"EN", quick:"\u5FEB\u6377", dialHint:"\u62D6\u52A8\u8BBE\u7F6E\u6301\u7EED\u5F3A\u5EA6",
+      buzz:"\u26A1 \u6309\u4F4F\u9707\u52A8", pulse:"\u8109\u51B2", wave:"\u6CE2\u6D6A", escalate:"\u9012\u589E", tease:"\u6311\u9017",
+      roulette:"\u{1F3B2} \u8F6E\u76D8", ambient:"\u{1F30A} \u73AF\u5883", safetyMax:"\u5B89\u5168\u4E0A\u9650", stopAll:"\u25A0 \u5168\u90E8\u505C\u6B62",
+      inControl:"\u63A7\u5236\u4E2D", connecting:"\u8FDE\u63A5\u4E2D\u2026", reconnecting:"\u91CD\u8FDE\u4E2D\u2026",
+      noDev:"\u6682\u65E0\u8BBE\u5907", devN:"{n} \u4E2A\u8BBE\u5907", devNs:"{n} \u4E2A\u8BBE\u5907" }
+  };
+  var lang = localStorage.getItem("opendick_lang") || ((navigator.language||"").indexOf("zh")===0 ? "zh" : "en");
+  function t(k){ return (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k; }
+  function applyI18n(){
+    document.querySelectorAll("[data-i18n]").forEach(function(el){ el.textContent = t(el.getAttribute("data-i18n")); });
+    document.getElementById("lang").textContent = t("langBtn");
+    if (lastState) renderInfo(lastState);
+    $("#status").textContent = (ws && ws.readyState===1) ? t("inControl") : t("connecting");
+  }
+  var $ = function(s){ return document.querySelector(s); };
+  var ws, held = false, maxHeld = false, lastState = null;
+
+  function connect() {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/ws?role=master");
+    ws.onopen = function(){ $("#dot").classList.add("on"); $("#status").textContent = t("inControl"); };
+    ws.onclose = function(){ $("#dot").classList.remove("on"); $("#status").textContent = t("reconnecting"); setTimeout(connect, 1000); };
+    ws.onmessage = function(e){ var m = JSON.parse(e.data); if (m.type === "state") { lastState = m.state; renderInfo(m.state); } };
+  }
+  var send = function(o){ try { if (ws && ws.readyState===1) ws.send(JSON.stringify(o)); } catch(e){} };
+
+  function renderInfo(s){
+    var d = s.devices[0];
+    $("#devinfo").textContent = s.devices.length
+      ? (s.devices.length>1 ? t("devNs") : t("devN")).replace("{n}", s.devices.length) + " \xB7 " + s.mode
+      : t("noDev");
+    if (d && !held) { var p = Math.round(d.intensity*100); $("#lvl").textContent = p; $("#dial").value = p; }
+    if (!maxHeld) { $("#max").value = s.maxIntensity; $("#maxval").textContent = Math.round(s.maxIntensity*100)+"%"; }
+  }
+
+  var dial = $("#dial");
+  dial.addEventListener("input", function(){ held = true; $("#lvl").textContent = dial.value; send({ type:"set", id:"all", intensity: dial.value/100 }); });
+  dial.addEventListener("pointerup", function(){ held = false; });
+  dial.addEventListener("pointercancel", function(){ held = false; });
+
+  var buzz = $("#buzz");
+  var startBuzz = function(e){ e.preventDefault(); send({ type:"set", id:"all", intensity:1 }); };
+  var endBuzz = function(){ send({ type:"set", id:"all", intensity:0 }); };
+  buzz.addEventListener("pointerdown", startBuzz);
+  buzz.addEventListener("pointerup", endBuzz);
+  buzz.addEventListener("pointerleave", endBuzz);
+  buzz.addEventListener("pointercancel", endBuzz);
+
+  document.querySelectorAll("[data-pat]").forEach(function(b){
+    b.addEventListener("click", function(){ send({ type:"pattern", preset:b.getAttribute("data-pat"), loops:3 }); }); });
+  document.querySelectorAll("[data-game]").forEach(function(b){
+    b.addEventListener("click", function(){ send({ type:"start_game", gameType:b.getAttribute("data-game") }); }); });
+
+  var max = $("#max");
+  max.addEventListener("pointerdown", function(){ maxHeld = true; });
+  max.addEventListener("pointerup", function(){ maxHeld = false; });
+  max.addEventListener("input", function(){ $("#maxval").textContent = Math.round(max.value*100)+"%"; send({ type:"set_max", value: parseFloat(max.value) }); });
+
+  $("#stop").addEventListener("click", function(){ dial.value = 0; $("#lvl").textContent = "0"; send({ type:"stop_all" }); });
+  $("#lang").addEventListener("click", function(){ lang = (lang === "en" ? "zh" : "en"); localStorage.setItem("opendick_lang", lang); applyI18n(); });
+
+  applyI18n();
+  $("#status").textContent = t("connecting");
+  connect();
+</script>
+</body>
+</html>`
+);
+
+// src/presets.ts
+var PRESETS = {
+  pulse: [
+    { intensity: 0.75, ms: 400 },
+    { intensity: 0, ms: 300 }
+  ],
+  wave: [
+    { intensity: 0.2, ms: 300 },
+    { intensity: 0.5, ms: 300 },
+    { intensity: 0.85, ms: 300 },
+    { intensity: 0.5, ms: 300 }
+  ],
+  escalate: [
+    { intensity: 0.2, ms: 1e3 },
+    { intensity: 0.4, ms: 1e3 },
+    { intensity: 0.6, ms: 1e3 },
+    { intensity: 0.8, ms: 1e3 },
+    { intensity: 1, ms: 1500 }
+  ],
+  tease: [
+    { intensity: 0.6, ms: 800 },
+    { intensity: 0, ms: 1200 },
+    { intensity: 0.85, ms: 600 },
+    { intensity: 0, ms: 1500 }
+  ]
+};
+
 // src/console.ts
 function startConsole(manager2, modes2, port2) {
   const httpServer = http.createServer((req, res) => {
-    if (req.url === "/" || req.url?.startsWith("/index")) {
+    const path = (req.url ?? "/").split("?")[0];
+    if (path === "/" || path.startsWith("/index")) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(CONSOLE_HTML);
-    } else if (req.url === "/state") {
+    } else if (path === "/master") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(MASTER_HTML);
+    } else if (path === "/state") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(manager2.snapshot()));
     } else {
@@ -15306,6 +15590,7 @@ function startConsole(manager2, modes2, port2) {
     }
   });
   const wss = new import_websocket_server.default({ server: httpServer, path: "/ws" });
+  const masters = /* @__PURE__ */ new Set();
   const broadcast = () => {
     const msg = JSON.stringify({ type: "state", state: manager2.snapshot() });
     for (const client of wss.clients) {
@@ -15313,8 +15598,16 @@ function startConsole(manager2, modes2, port2) {
     }
   };
   manager2.on("state", broadcast);
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    const isMaster = (req.url ?? "").includes("role=master");
+    if (isMaster) {
+      masters.add(ws);
+      manager2.setMasterCount(masters.size);
+    }
     ws.send(JSON.stringify({ type: "state", state: manager2.snapshot() }));
+    ws.on("close", () => {
+      if (masters.delete(ws)) manager2.setMasterCount(masters.size);
+    });
     ws.on("message", async (raw) => {
       let m;
       try {
@@ -15327,6 +15620,18 @@ function startConsole(manager2, modes2, port2) {
           case "set":
             await manager2.vibrate(m.id ?? "all", Number(m.intensity), m.durationMs);
             break;
+          case "drive":
+            for (const id of manager2.resolveTargets(m.target ?? "all")) {
+              await manager2.driveStep(id, Number(m.intensity));
+            }
+            break;
+          case "audio_start":
+            manager2.setActiveMode({ type: "audio", label: String(m.source ?? "mic") });
+            break;
+          case "audio_stop":
+            await manager2.stop(m.target ?? "all");
+            manager2.setActiveMode(null);
+            break;
           case "stop_all":
             await manager2.stopAll();
             break;
@@ -15336,6 +15641,11 @@ function startConsole(manager2, modes2, port2) {
           case "set_max":
             manager2.setMaxIntensity(Number(m.value));
             break;
+          case "pattern": {
+            const steps = PRESETS[m.preset] ?? PRESETS.pulse;
+            await manager2.pattern(m.target ?? "all", steps, Number(m.loops) || 1);
+            break;
+          }
           case "load_funscript":
             await modes2.loadFunscript(String(m.source));
             break;
@@ -15372,7 +15682,7 @@ function startConsole(manager2, modes2, port2) {
       resolve();
     });
     httpServer.listen(port2, () => {
-      logErr(`console: http://localhost:${port2}`);
+      logErr(`console: http://localhost:${port2}  (master remote: /master)`);
       resolve();
     });
   });
@@ -29592,31 +29902,6 @@ var StdioServerTransport = class {
 };
 
 // src/mcp.ts
-var PRESETS = {
-  pulse: [
-    { intensity: 0.75, ms: 400 },
-    { intensity: 0, ms: 300 }
-  ],
-  wave: [
-    { intensity: 0.2, ms: 300 },
-    { intensity: 0.5, ms: 300 },
-    { intensity: 0.85, ms: 300 },
-    { intensity: 0.5, ms: 300 }
-  ],
-  escalate: [
-    { intensity: 0.2, ms: 1e3 },
-    { intensity: 0.4, ms: 1e3 },
-    { intensity: 0.6, ms: 1e3 },
-    { intensity: 0.8, ms: 1e3 },
-    { intensity: 1, ms: 1500 }
-  ],
-  tease: [
-    { intensity: 0.6, ms: 800 },
-    { intensity: 0, ms: 1200 },
-    { intensity: 0.85, ms: 600 },
-    { intensity: 0, ms: 1500 }
-  ]
-};
 var text = (obj) => ({
   content: [{ type: "text", text: JSON.stringify(obj, null, 2) }]
 });
